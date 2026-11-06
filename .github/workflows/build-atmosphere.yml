@@ -1,0 +1,54 @@
+name: Build Ritm Atmosphere APK
+on:
+  push:
+    branches: [atmosphere-android]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract isolated Android project
+        run: |
+          mkdir -p android-port
+          base64 -d atmosphere-transfer.b64 | tar -xJ -C android-port
+          find android-port -maxdepth 3 -type f | head -50
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install platform and NDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
+      - name: Get Snowhush upstream
+        run: |
+          git clone https://github.com/mbezruchko/Snowhush.git android-port/original-snowhush
+          cd android-port/original-snowhush
+          git checkout 013f36782e5c6d017725aeb4b2173ae329bf0c6e
+          mkdir -p ../app/src/main/assets
+          cp LICENSE ../app/src/main/assets/SNOWHUSH_LICENSE.txt
+      - name: Build Rust native physics
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk --locked
+          cd android-port/native
+          cargo ndk -t arm64-v8a -o ../app/src/main/jniLibs build --release
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Build debug APK
+        run: |
+          cd android-port
+          gradle :app:assembleDebug --stacktrace --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RitmAtmosphere-alpha-arm64
+          path: android-port/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+          if-no-files-found: error
